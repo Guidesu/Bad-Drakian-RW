@@ -15,14 +15,14 @@
 	var/mob/living/occupant
 	var/mob/living/current_carrier
 	var/escaping = FALSE
-	var/partial_bound_escape_time = 45 SECONDS
-	var/bound_escape_time = 2 MINUTES
+	var/last_jostle = 0
 	var/carry_slowdown = 0.15
-	var/base_escape_time = 18 SECONDS
-	var/strong_escape_time = 8 SECONDS
+	var/base_escape_time = 40 SECONDS
+	var/strong_escape_time = 30 SECONDS
 	var/blade_escape_time = 4 SECONDS
 	var/easy_to_cut = TRUE
 	var/movespeed_id
+	var/inhand_icon_state = "capture_sack_inhand"
 
 /obj/item/capture_sack/Initialize(mapload)
 	movespeed_id = "capture_sack_[REF(src)]"
@@ -48,11 +48,22 @@
 		return
 	switch(tag)
 		if("gen")
-			return list("shrink" = 0.75, "sx" = -5, "sy" = -5, "nx" = 5, "ny" = -4, "wx" = -3, "wy" = -5, "ex" = 3, "ey" = -5, "northabove" = 0, "southabove" = 1, "eastabove" = 1, "westabove" = 0, "nturn" = 0, "sturn" = 0, "wturn" = 0, "eturn" = 0, "nflip" = 8, "sflip" = 0, "wflip" = 0, "eflip" = 8)
+			return list("shrink" = 0.85, "sx" = -8, "sy" = -8, "nx" = 8, "ny" = -7, "wx" = -6, "wy" = -7, "ex" = 6, "ey" = -7, "northabove" = 0, "southabove" = 1, "eastabove" = 1, "westabove" = 0, "nturn" = 0, "sturn" = 0, "wturn" = -15, "eturn" = 15, "nflip" = 8, "sflip" = 0, "wflip" = 0, "eflip" = 8)
 		if("onback")
 			return list("shrink" = 0.85, "sx" = 0, "sy" = 1, "nx" = 0, "ny" = 2, "wx" = 2, "wy" = 1, "ex" = -2, "ey" = 1, "northabove" = 1, "southabove" = 0, "eastabove" = 0, "westabove" = 0, "nturn" = 0, "sturn" = 0, "wturn" = 0, "eturn" = 0, "nflip" = 0, "sflip" = 0, "wflip" = 0, "eflip" = 8)
 		if("onbelt")
 			return list("shrink" = 0.55, "sx" = -3, "sy" = -6, "nx" = 3, "ny" = -6, "wx" = 0, "wy" = -6, "ex" = 1, "ey" = -6, "northabove" = 0, "southabove" = 1, "eastabove" = 1, "westabove" = 0, "nturn" = 0, "sturn" = 0, "wturn" = 0, "eturn" = 0, "nflip" = 0, "sflip" = 0, "wflip" = 0, "eflip" = 8)
+
+/obj/item/capture_sack/generateonmob(tag, prop, behind = FALSE, mirrored = FALSE, used_index = null)
+	if(tag != "gen")
+		return ..()
+	var/old_icon = icon
+	var/old_icon_state = icon_state
+	icon = 'modular_azurepeak/icons/obj/items/capture_sack.dmi'
+	icon_state = inhand_icon_state
+	. = ..()
+	icon = old_icon
+	icon_state = old_icon_state
 
 /obj/item/capture_sack/proc/occupant_is_small()
 	if(!occupant)
@@ -151,6 +162,11 @@
 /obj/item/capture_sack/container_resist(mob/living/user)
 	if(user != occupant || escaping)
 		return
+	if(iscarbon(user))
+		var/mob/living/carbon/carbon_user = user
+		if(carbon_user.handcuffed || carbon_user.legcuffed)
+			carbon_user.resist_restraints()
+			return
 	escaping = TRUE
 	user.changeNext_move(CLICK_CD_BREAKOUT)
 	user.last_special = world.time + CLICK_CD_BREAKOUT
@@ -166,23 +182,16 @@
 		escape_time = blade_escape_time
 		escape_method = "cut"
 	else if(user.STASTR >= 15)
-		escape_time = max(3 SECONDS, strong_escape_time - ((user.STASTR - 15) * 1 SECONDS))
-	if(iscarbon(user))
-		var/mob/living/carbon/carbon_user = user
-		if(carbon_user.handcuffed && carbon_user.legcuffed)
-			escape_time = bound_escape_time
-		else if(carbon_user.handcuffed || carbon_user.legcuffed)
-			escape_time = partial_bound_escape_time
-
-	if(!cutting_blade && !prob(clamp(user.STASTR * 5, 5, 95)))
-		visible_message(span_warning("[src] jostles as someone struggles inside, but they cannot find enough leverage!"))
-		to_chat(user, span_warning("I strain against [src], but cannot find enough leverage."))
-		escaping = FALSE
-		return
+		escape_time = max(20 SECONDS, strong_escape_time - ((user.STASTR - 15) * 1 SECONDS))
 
 	visible_message(span_warning("[src] jerks and thrashes as someone struggles inside!"))
 	to_chat(user, span_warning("I begin to [escape_method] my way out of [src]..."))
 	if(!do_after(user, escape_time, needhand = !!cutting_blade, target = user) || user.loc != src)
+		escaping = FALSE
+		return
+	if(!cutting_blade && !prob(clamp(user.STASTR * 5, 5, 95)))
+		visible_message(span_warning("[src] jostles as someone struggles inside, but they cannot find enough leverage!"))
+		to_chat(user, span_warning("I strain against [src], but cannot find enough leverage."))
 		escaping = FALSE
 		return
 	if(cutting_blade && !QDELETED(cutting_blade))
@@ -234,10 +243,9 @@
 
 /obj/item/capture_sack/proc/carrier_moved(datum/source)
 	SIGNAL_HANDLER
-	if(escaping && occupant?.doing)
-		occupant.doing = FALSE
-		visible_message(span_warning("[src] jostles against its moving carrier, spoiling the captive's escape attempt!"))
-		to_chat(occupant, span_warning("The movement throws me around and ruins my escape attempt."))
+	if(escaping && world.time >= last_jostle + 2 SECONDS)
+		last_jostle = world.time
+		visible_message(span_warning("[src] jostles as its captive struggles against the moving carrier!"))
 
 /obj/item/capture_sack/proc/remove_carrier_slowdown()
 	if(current_carrier)
@@ -258,6 +266,7 @@
 	blade_escape_time = 24 SECONDS
 	easy_to_cut = FALSE
 	carry_slowdown = 0.15
+	inhand_icon_state = "capture_sack_chain_inhand"
 
 /obj/item/capture_sack/chain/iron
 	name = "iron chain capture sack"
