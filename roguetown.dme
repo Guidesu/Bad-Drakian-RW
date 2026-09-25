@@ -3423,6 +3423,7 @@
 #include "modular_azurepeak\code\game\objects\effects\temporary_visuals\miracles.dm"
 #include "modular_azurepeak\code\game\objects\effects\temporary_visuals\music.dm"
 #include "modular_azurepeak\code\game\objects\items\bmbstrap.dm"
+#include "modular_azurepeak\code\game\objects\items\capture_sack.dm"
 #include "modular_azurepeak\code\game\objects\items\cosmetics.dm"
 #include "modular_azurepeak\code\game\objects\items\donator_fluff_items.dm"
 #include "modular_azurepeak\code\game\objects\items\donator_modkit.dm"
